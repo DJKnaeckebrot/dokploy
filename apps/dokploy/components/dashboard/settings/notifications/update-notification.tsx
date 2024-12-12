@@ -5,6 +5,14 @@ import {
 } from "@/components/icons/notification-icons";
 import { Button } from "@/components/ui/button";
 import {
+	Command,
+	CommandEmpty,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
+} from "@/components/ui/command";
+import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -23,10 +31,20 @@ import {
 	FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
+import {
+	type Services,
+	extractServices,
+} from "@/pages/dashboard/project/[projectId]";
 import { api } from "@/utils/api";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Mail, PenBoxIcon } from "lucide-react";
+import { Check, ChevronsUpDown, Mail, PenBoxIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { FieldErrors, useFieldArray, useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -34,7 +52,6 @@ import {
 	type NotificationSchema,
 	notificationSchema,
 } from "./add-notification";
-
 interface Props {
 	notificationId: string;
 }
@@ -42,6 +59,7 @@ interface Props {
 export const UpdateNotification = ({ notificationId }: Props) => {
 	const utils = api.useUtils();
 	const [isOpen, setIsOpen] = useState(false);
+	const [open, setOpen] = useState(false);
 	const { data, refetch } = api.notification.one.useQuery(
 		{
 			notificationId,
@@ -64,11 +82,13 @@ export const UpdateNotification = ({ notificationId }: Props) => {
 	const discordMutation = api.notification.updateDiscord.useMutation();
 	const emailMutation = api.notification.updateEmail.useMutation();
 	const { data: isCloud } = api.settings.isCloud.useQuery();
+	const { data: projects } = api.project.all.useQuery();
 	const form = useForm<NotificationSchema>({
 		defaultValues: {
 			type: "slack",
 			webhookUrl: "",
 			channel: "",
+			appId: "",
 		},
 		resolver: zodResolver(notificationSchema),
 	});
@@ -109,6 +129,7 @@ export const UpdateNotification = ({ notificationId }: Props) => {
 				form.reset({
 					appBuildError: data.appBuildError,
 					appDeploy: data.appDeploy,
+					appId: data.appId,
 					dokployRestart: data.dokployRestart,
 					databaseBackup: data.databaseBackup,
 					type: data.notificationType,
@@ -179,6 +200,7 @@ export const UpdateNotification = ({ notificationId }: Props) => {
 				databaseBackup: databaseBackup,
 				webhookUrl: formData.webhookUrl,
 				name: formData.name,
+				appId: formData.appId,
 				notificationId: notificationId,
 				discordId: data?.discordId,
 				dockerCleanup: dockerCleanup,
@@ -215,6 +237,24 @@ export const UpdateNotification = ({ notificationId }: Props) => {
 				});
 		}
 	};
+
+	const applications: Services[] = [];
+
+	applications.push({
+		name: "All Applications",
+		type: "application",
+		id: "all",
+		createdAt: new Date().toISOString(),
+		status: "running",
+		description: "all",
+	});
+
+	projects?.map((project) => {
+		const app: Services[] = extractServices(project);
+
+		applications.push(...app);
+	});
+
 	return (
 		<Dialog open={isOpen} onOpenChange={setIsOpen}>
 			<DialogTrigger className="" asChild>
@@ -356,23 +396,91 @@ export const UpdateNotification = ({ notificationId }: Props) => {
 								)}
 
 								{type === "discord" && (
-									<FormField
-										control={form.control}
-										name="webhookUrl"
-										render={({ field }) => (
-											<FormItem>
-												<FormLabel>Webhook URL</FormLabel>
-												<FormControl>
-													<Input
-														placeholder="https://discord.com/api/webhooks/123456789/ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-														{...field}
-													/>
-												</FormControl>
+									<>
+										<FormField
+											control={form.control}
+											name="webhookUrl"
+											render={({ field }) => (
+												<FormItem>
+													<FormLabel>Webhook URL</FormLabel>
+													<FormControl>
+														<Input
+															placeholder="https://discord.com/api/webhooks/123456789/ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+															{...field}
+														/>
+													</FormControl>
 
-												<FormMessage />
-											</FormItem>
-										)}
-									/>
+													<FormMessage />
+												</FormItem>
+											)}
+										/>
+										<FormField
+											control={form.control}
+											name="appId"
+											render={({ field }) => (
+												<FormItem>
+													<FormLabel>Service</FormLabel>
+													<Popover open={open} onOpenChange={setOpen}>
+														<PopoverTrigger asChild>
+															<Button
+																variant="secondary"
+																// biome-ignore lint/a11y/useSemanticElements: <explanation>
+																role="combobox"
+																aria-expanded={open}
+																className="w-full justify-between"
+															>
+																{(field.value === "all"
+																	? "All Services"
+																	: applications.find(
+																			(application) =>
+																				application.id.toLowerCase() ===
+																				field.value.toLowerCase(),
+																		)?.name) || "Select application..."}
+																<ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+															</Button>
+														</PopoverTrigger>
+														<PopoverContent className="w-full p-0 justify-start">
+															<Command>
+																<CommandInput placeholder="Search service..." />
+																<CommandList>
+																	<CommandEmpty>
+																		No applications found.
+																	</CommandEmpty>
+																	<CommandGroup>
+																		{applications.map((service) => (
+																			<CommandItem
+																				key={service.id}
+																				value={service.id}
+																				onSelect={(currentValue) => {
+																					field.onChange(currentValue);
+																					console.log(
+																						"DEBUG: currentValue",
+																						currentValue,
+																					);
+																					setOpen(false);
+																				}}
+																			>
+																				<Check
+																					className={cn(
+																						"mr-2 h-4 w-4",
+																						field.value === service.id
+																							? "opacity-100"
+																							: "opacity-0",
+																					)}
+																				/>
+																				{service.name}
+																			</CommandItem>
+																		))}
+																	</CommandGroup>
+																</CommandList>
+															</Command>
+														</PopoverContent>
+													</Popover>
+													<FormMessage />
+												</FormItem>
+											)}
+										/>
+									</>
 								)}
 								{type === "email" && (
 									<>

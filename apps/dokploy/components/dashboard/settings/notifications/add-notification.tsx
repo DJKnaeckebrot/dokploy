@@ -5,6 +5,14 @@ import {
 } from "@/components/icons/notification-icons";
 import { Button } from "@/components/ui/button";
 import {
+	Command,
+	CommandEmpty,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
+} from "@/components/ui/command";
+import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
@@ -24,20 +32,33 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
+import {
+	type Services,
+	extractServices,
+} from "@/pages/dashboard/project/[projectId]";
 import { api } from "@/utils/api";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlertTriangle, Mail } from "lucide-react";
+import { AlertTriangle, Check, ChevronsUpDown, Mail } from "lucide-react";
+import { App } from "octokit";
 import { useEffect, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { formData } from "zod-form-data";
 
 const notificationBaseSchema = z.object({
 	name: z.string().min(1, {
 		message: "Name is required",
 	}),
+	appId: z.string().min(1).default("all"),
 	appDeploy: z.boolean().default(false),
 	appBuildError: z.boolean().default(false),
 	databaseBackup: z.boolean().default(false),
@@ -64,6 +85,7 @@ export const notificationSchema = z.discriminatedUnion("type", [
 		.object({
 			type: z.literal("discord"),
 			webhookUrl: z.string().min(1, { message: "Webhook URL is required" }),
+			appId: z.string().min(1, { message: "You must choose an application" }),
 		})
 		.merge(notificationBaseSchema),
 	z
@@ -109,6 +131,7 @@ export type NotificationSchema = z.infer<typeof notificationSchema>;
 export const AddNotification = () => {
 	const utils = api.useUtils();
 	const [visible, setVisible] = useState(false);
+	const [open, setOpen] = useState(false);
 	const { data: isCloud } = api.settings.isCloud.useQuery();
 	const { mutateAsync: testSlackConnection, isLoading: isLoadingSlack } =
 		api.notification.testSlackConnection.useMutation();
@@ -124,12 +147,15 @@ export const AddNotification = () => {
 	const discordMutation = api.notification.createDiscord.useMutation();
 	const emailMutation = api.notification.createEmail.useMutation();
 
+	const { data } = api.project.all.useQuery();
+
 	const form = useForm<NotificationSchema>({
 		defaultValues: {
 			type: "slack",
 			webhookUrl: "",
 			channel: "",
 			name: "",
+			appId: "all",
 		},
 		resolver: zodResolver(notificationSchema),
 	});
@@ -190,6 +216,7 @@ export const AddNotification = () => {
 			});
 		} else if (data.type === "discord") {
 			promise = discordMutation.mutateAsync({
+				appId: data.appId,
 				appBuildError: appBuildError,
 				appDeploy: appDeploy,
 				dokployRestart: dokployRestart,
@@ -231,6 +258,28 @@ export const AddNotification = () => {
 				});
 		}
 	};
+
+	const applications: Services[] = [];
+
+	applications.push({
+		name: "All Applications",
+		type: "application",
+		id: "all",
+		createdAt: new Date().toISOString(),
+		status: "running",
+		description: "all",
+	});
+
+	data?.map((project) => {
+		const app: Services[] = extractServices(project);
+
+		applications.push(...app);
+	});
+
+	useEffect(() => {
+		console.log("DEBUG: Applications", applications);
+	}, [applications]);
+
 	return (
 		<Dialog open={visible} onOpenChange={setVisible}>
 			<DialogTrigger className="" asChild>
@@ -240,7 +289,7 @@ export const AddNotification = () => {
 				<DialogHeader>
 					<DialogTitle>Add Notification</DialogTitle>
 					<DialogDescription>
-						Create new notifications providers for multiple
+						Create new notifications providers
 					</DialogDescription>
 				</DialogHeader>
 				<Form {...form}>
@@ -304,7 +353,7 @@ export const AddNotification = () => {
 
 						<div className="flex flex-col gap-4">
 							<FormLabel className="text-lg font-semibold leading-none tracking-tight">
-								Fill the next fields.
+								Fill the next fields
 							</FormLabel>
 							<div className="flex flex-col gap-2">
 								<FormField
@@ -397,23 +446,91 @@ export const AddNotification = () => {
 								)}
 
 								{type === "discord" && (
-									<FormField
-										control={form.control}
-										name="webhookUrl"
-										render={({ field }) => (
-											<FormItem>
-												<FormLabel>Webhook URL</FormLabel>
-												<FormControl>
-													<Input
-														placeholder="https://discord.com/api/webhooks/123456789/ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-														{...field}
-													/>
-												</FormControl>
+									<>
+										<FormField
+											control={form.control}
+											name="webhookUrl"
+											render={({ field }) => (
+												<FormItem>
+													<FormLabel>Webhook URL</FormLabel>
+													<FormControl>
+														<Input
+															placeholder="https://discord.com/api/webhooks/123456789/ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+															{...field}
+														/>
+													</FormControl>
 
-												<FormMessage />
-											</FormItem>
-										)}
-									/>
+													<FormMessage />
+												</FormItem>
+											)}
+										/>
+										<FormField
+											control={form.control}
+											name="appId"
+											render={({ field }) => (
+												<FormItem>
+													<FormLabel>Service</FormLabel>
+													<Popover open={open} onOpenChange={setOpen}>
+														<PopoverTrigger asChild>
+															<Button
+																variant="secondary"
+																// biome-ignore lint/a11y/useSemanticElements: <explanation>
+																role="combobox"
+																aria-expanded={open}
+																className="w-full justify-between"
+															>
+																{(field.value === "all"
+																	? "All Services"
+																	: applications.find(
+																			(application) =>
+																				application.id.toLowerCase() ===
+																				field.value.toLowerCase(),
+																		)?.name) || "Select application..."}
+																<ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+															</Button>
+														</PopoverTrigger>
+														<PopoverContent className="w-full p-0 justify-start">
+															<Command>
+																<CommandInput placeholder="Search service..." />
+																<CommandList>
+																	<CommandEmpty>
+																		No applications found.
+																	</CommandEmpty>
+																	<CommandGroup>
+																		{applications.map((service) => (
+																			<CommandItem
+																				key={service.id}
+																				value={service.id}
+																				onSelect={(currentValue) => {
+																					field.onChange(currentValue);
+																					console.log(
+																						"DEBUG: currentValue",
+																						currentValue,
+																					);
+																					setOpen(false);
+																				}}
+																			>
+																				<Check
+																					className={cn(
+																						"mr-2 h-4 w-4",
+																						field.value === service.id
+																							? "opacity-100"
+																							: "opacity-0",
+																					)}
+																				/>
+																				{service.name}
+																			</CommandItem>
+																		))}
+																	</CommandGroup>
+																</CommandList>
+															</Command>
+														</PopoverContent>
+													</Popover>
+													<FormMessage />
+												</FormItem>
+											)}
+										/>
+									</>
 								)}
 
 								{type === "email" && (
