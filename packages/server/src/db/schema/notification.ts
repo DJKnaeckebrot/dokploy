@@ -18,6 +18,7 @@ export const notifications = pgTable("notification", {
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
 	name: text("name").notNull(),
+	appId: text("appId").notNull().default("all"),
 	appDeploy: boolean("appDeploy").notNull().default(false),
 	appBuildError: boolean("appBuildError").notNull().default(false),
 	databaseBackup: boolean("databaseBackup").notNull().default(false),
@@ -171,6 +172,7 @@ export const apiCreateDiscord = notificationsSchema
 	})
 	.extend({
 		webhookUrl: z.string().min(1),
+		appId: z.string().min(1),
 	})
 	.required();
 
